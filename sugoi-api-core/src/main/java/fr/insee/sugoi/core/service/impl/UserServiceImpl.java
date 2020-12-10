@@ -100,4 +100,15 @@ public class UserServiceImpl implements UserService {
     // TODO Auto-generated method stub
     return null;
   }
+
+  @Override
+  public User delete(String domaine, String id) {
+    Realm realm = realmProvider.load(domaine);
+    UserStorage userStorage = realm.getUserStorages().get(0);
+    storeProvider
+        .getStoreForUserStorage(realm.getName(), userStorage.getName())
+        .getWriter()
+        .deleteUser(domaine, id);
+    return null;
+  }
 }
