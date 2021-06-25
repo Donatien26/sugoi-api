@@ -25,10 +25,9 @@ import com.unboundid.ldap.sdk.ModifyRequest;
 import com.unboundid.ldap.sdk.ResultCode;
 import com.unboundid.ldap.sdk.extensions.PasswordModifyExtendedRequest;
 import com.unboundid.util.SubtreeDeleter;
+import fr.insee.sugoi.core.exceptions.AppManagedAttributeException;
 import fr.insee.sugoi.core.exceptions.InvalidPasswordException;
 import fr.insee.sugoi.core.exceptions.StoragePolicyNotMetException;
-import fr.insee.sugoi.core.model.PasswordChangeRequest;
-import fr.insee.sugoi.core.model.SendMode;
 import fr.insee.sugoi.core.store.WriterStore;
 import fr.insee.sugoi.ldap.utils.LdapFactory;
 import fr.insee.sugoi.ldap.utils.config.LdapConfigKeys;
@@ -41,9 +40,12 @@ import fr.insee.sugoi.model.Application;
 import fr.insee.sugoi.model.Group;
 import fr.insee.sugoi.model.Organization;
 import fr.insee.sugoi.model.User;
+import fr.insee.sugoi.model.paging.PasswordChangeRequest;
+import fr.insee.sugoi.model.paging.SendMode;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
 public class LdapWriterStore extends LdapStore implements WriterStore {
@@ -76,6 +78,9 @@ public class LdapWriterStore extends LdapStore implements WriterStore {
   public void deleteUser(String id) {
     try {
       User currentUser = ldapReaderStore.getUser(id);
+      currentUser
+          .getGroups()
+          .forEach(group -> deleteUserFromGroup(group.getAppName(), group.getName(), id));
       if (currentUser.getAddress().get("id") != null) {
         deleteAddress(currentUser.getAddress().get("id"));
       }
@@ -380,8 +385,25 @@ public class LdapWriterStore extends LdapStore implements WriterStore {
               getApplicationDN(updatedApplication.getName()),
               applicationLdapMapper.createMods(updatedApplication));
       ldapPoolConnection.modify(mr);
-      updatedApplication.getGroups().stream()
-          .forEach(group -> createGroup(updatedApplication.getName(), group));
+      List<Group> alreadyExistingGroups =
+          ldapReaderStore.getApplication(updatedApplication.getName()).getGroups();
+      for (Group existingGroup : alreadyExistingGroups) {
+        Optional<Group> optionalGroup =
+            updatedApplication.getGroups().stream()
+                .filter(group -> group.getName().equalsIgnoreCase(existingGroup.getName()))
+                .findFirst();
+        if (optionalGroup.isPresent()) {
+          updateGroup(updatedApplication.getName(), optionalGroup.get());
+        } else {
+          deleteGroup(updatedApplication.getName(), existingGroup.getName());
+        }
+      }
+      for (Group updatedGroup : updatedApplication.getGroups()) {
+        if (alreadyExistingGroups.stream()
+            .allMatch(group -> !group.getName().equalsIgnoreCase(updatedGroup.getName())))
+          createGroup(updatedApplication.getName(), updatedGroup);
+      }
+
     } catch (LDAPException e) {
       throw new RuntimeException(
           "Failed to update application " + updatedApplication.getName() + "while writing to LDAP",
@@ -427,5 +449,46 @@ public class LdapWriterStore extends LdapStore implements WriterStore {
   private void deleteAddress(String id) throws LDAPException {
     DeleteRequest deleteRequest = new DeleteRequest(getAddressDN(id));
     ldapPoolConnection.delete(deleteRequest);
+  }
+
+  @Override
+  public void addAppManagedAttribute(String userId, String attributeKey, String attributeValue) {
+    try {
+      ModifyRequest modifyAttributeRequest =
+          new ModifyRequest(
+              getUserDN(userId),
+              new Modification(ModificationType.ADD, attributeKey, attributeValue));
+      ldapPoolConnection.modify(modifyAttributeRequest);
+    } catch (LDAPException e) {
+      throw new RuntimeException(
+          "Failed to update user attribute "
+              + attributeKey
+              + " with value "
+              + attributeValue
+              + " while writing to LDAP",
+          e);
+    }
+  }
+
+  @Override
+  public void deleteAppManagedAttribute(String userId, String attributeKey, String attributeValue) {
+    try {
+      ModifyRequest modifyAttributeRequest =
+          new ModifyRequest(
+              getUserDN(userId),
+              new Modification(ModificationType.DELETE, attributeKey, attributeValue));
+      ldapPoolConnection.modify(modifyAttributeRequest);
+    } catch (LDAPException e) {
+      if (e.getResultCode().equals(ResultCode.NO_SUCH_ATTRIBUTE)) {
+        throw new AppManagedAttributeException("Cannot delete, attribute not found", e);
+      }
+      throw new RuntimeException(
+          "Failed to update user attribute "
+              + attributeKey
+              + " with value "
+              + attributeValue
+              + " while writing to LDAP",
+          e);
+    }
   }
 }

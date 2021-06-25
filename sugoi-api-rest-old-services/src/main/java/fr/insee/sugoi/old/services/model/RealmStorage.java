@@ -11,23 +11,28 @@
 * See the License for the specific language governing permissions and
 * limitations under the License.
 */
-package fr.insee.sugoi.core.model;
+package fr.insee.sugoi.old.services.model;
 
-public enum SendMode {
-  MAIL("mail"),
-  LETTER("letter");
+public class RealmStorage {
+  private String realm;
+  private String userStorage;
 
-  private String sendMode;
-
-  private SendMode(String sendMode) {
-    this.setSendMode(sendMode);
+  public RealmStorage(String realmStorage) {
+    String[] res = realmStorage.split("_", 2);
+    this.realm = res[0];
+    this.userStorage = res[1];
   }
 
-  public void setSendMode(String sendMode) {
-    this.sendMode = sendMode;
+  public RealmStorage(String realm, String storage) {
+    this.realm = realm;
+    this.userStorage = storage;
   }
 
-  public String getSendMode() {
-    return sendMode;
+  public String getRealm() {
+    return realm;
+  }
+
+  public String getUserStorage() {
+    return userStorage;
   }
 }

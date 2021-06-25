@@ -20,8 +20,6 @@ import com.unboundid.ldap.sdk.SearchRequest;
 import com.unboundid.ldap.sdk.SearchResult;
 import com.unboundid.ldap.sdk.SearchResultEntry;
 import com.unboundid.ldap.sdk.SearchScope;
-import fr.insee.sugoi.core.model.PageResult;
-import fr.insee.sugoi.core.model.PageableResult;
 import fr.insee.sugoi.core.store.ReaderStore;
 import fr.insee.sugoi.ldap.utils.LdapFactory;
 import fr.insee.sugoi.ldap.utils.LdapFilter;
@@ -37,6 +35,8 @@ import fr.insee.sugoi.model.Application;
 import fr.insee.sugoi.model.Group;
 import fr.insee.sugoi.model.Organization;
 import fr.insee.sugoi.model.User;
+import fr.insee.sugoi.model.paging.PageResult;
+import fr.insee.sugoi.model.paging.PageableResult;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -49,6 +49,7 @@ public class LdapReaderStore extends LdapStore implements ReaderStore {
     logger.debug("Configuring LdapReaderStore with config : {}", config);
     try {
       this.ldapPoolConnection = LdapFactory.getConnectionPool(config);
+      this.ldapMonoConnection = LdapFactory.getSingleConnection(config);
       this.config = config;
       userLdapMapper = new UserLdapMapper(config);
       organizationLdapMapper = new OrganizationLdapMapper(config);
@@ -87,20 +88,25 @@ public class LdapReaderStore extends LdapStore implements ReaderStore {
    */
   @Override
   public Organization getOrganization(String id) {
-    SearchResultEntry entry = getEntryByDn(getOrganizationDN(id));
-    Organization org =
-        (entry != null) ? organizationLdapMapper.mapFromAttributes(entry.getAttributes()) : null;
-    if (org != null && org.getAddress() != null && org.getAddress().containsKey("id")) {
-      Map<String, String> address = getAddress(org.getAddress().get("id"));
-      if (address != null) {
-        address.put("id", org.getAddress().get("id"));
-        org.setAddress(address);
+    if (config.get(LdapConfigKeys.ORGANIZATION_SOURCE) != null) {
+      SearchResultEntry entry = getEntryByDn(getOrganizationDN(id));
+      Organization org =
+          (entry != null) ? organizationLdapMapper.mapFromAttributes(entry.getAttributes()) : null;
+      if (org != null && org.getAddress() != null && org.getAddress().containsKey("id")) {
+        Map<String, String> address = getAddress(org.getAddress().get("id"));
+        if (address != null) {
+          address.put("id", org.getAddress().get("id"));
+          org.setAddress(address);
+        }
       }
+      if (org != null && org.getOrganization() != null) {
+        org.setOrganization(getOrganization(org.getOrganization().getIdentifiant()));
+      }
+      return org;
+    } else {
+      throw new UnsupportedOperationException(
+          "Organizations feature not configured for this storage");
     }
-    if (org != null && org.getOrganization() != null) {
-      org.setOrganization(getOrganization(org.getOrganization().getIdentifiant()));
-    }
-    return org;
   }
 
   /** Search users matching userFilter set properties under the user_source */
@@ -119,15 +125,15 @@ public class LdapReaderStore extends LdapStore implements ReaderStore {
     }
   }
 
-  /** Retrieve all the users with their data in the specified group */
   @Override
   public PageResult<User> getUsersInGroup(String appName, String groupName) {
     PageResult<User> page = new PageResult<>();
     SearchResultEntry entry = getEntryByDn(getGroupDN(appName, groupName));
-    if (entry.hasAttribute("uniqueMember")) {
+    if (entry != null && entry.hasAttribute("uniqueMember")) {
       page.setResults(
           Arrays.stream(entry.getAttribute("uniqueMember").getValues())
               .map(uniqueMember -> getUser(LdapUtils.getNodeValueFromDN(uniqueMember)))
+              .filter(user -> user != null)
               .collect(Collectors.toList()));
     } else {
       page.setResults(new ArrayList<>());
@@ -135,19 +141,23 @@ public class LdapReaderStore extends LdapStore implements ReaderStore {
     return page;
   }
 
-  /** Search users matching organizationFilter set properties under the organization_source */
   @Override
   public PageResult<Organization> searchOrganizations(
       Organization organizationFilter, PageableResult pageable, String searchOperator) {
-    try {
-      return searchOnLdap(
-          config.get(LdapConfigKeys.ORGANIZATION_SOURCE),
-          SearchScope.SUBORDINATE_SUBTREE,
-          getFilterFromObject(organizationFilter, organizationLdapMapper, searchOperator),
-          pageable,
-          organizationLdapMapper);
-    } catch (LDAPSearchException e) {
-      throw new RuntimeException("Fail to search organizations in ldap", e);
+    if (config.get(LdapConfigKeys.ORGANIZATION_SOURCE) != null) {
+      try {
+        return searchOnLdap(
+            config.get(LdapConfigKeys.ORGANIZATION_SOURCE),
+            SearchScope.SUBORDINATE_SUBTREE,
+            getFilterFromObject(organizationFilter, organizationLdapMapper, searchOperator),
+            pageable,
+            organizationLdapMapper);
+      } catch (LDAPSearchException e) {
+        throw new RuntimeException("Fail to search organizations in ldap", e);
+      }
+    } else {
+      throw new UnsupportedOperationException(
+          "Organizations feature not configured for this storage");
     }
   }
 
@@ -195,7 +205,6 @@ public class LdapReaderStore extends LdapStore implements ReaderStore {
     }
   }
 
-  /** Retrieve the specified application with all its groups */
   @Override
   public Application getApplication(String applicationName) {
     SearchResultEntry entry = getEntryByDn(getApplicationDN(applicationName));
@@ -214,19 +223,22 @@ public class LdapReaderStore extends LdapStore implements ReaderStore {
     return application;
   }
 
-  /**
-   * Search applications matching applicationFilter set properties juste under application source
-   */
+  /** Search applications matching applicationFilter set properties just under application source */
   @Override
   public PageResult<Application> searchApplications(
       Application applicationFilter, PageableResult pageable, String searchOperator) {
     try {
-      return searchOnLdap(
-          config.get(LdapConfigKeys.APP_SOURCE),
-          SearchScope.ONE,
-          getFilterFromObject(applicationFilter, applicationLdapMapper, searchOperator),
-          pageable,
-          applicationLdapMapper);
+      if (config.get(LdapConfigKeys.APP_SOURCE) != null) {
+        return searchOnLdap(
+            config.get(LdapConfigKeys.APP_SOURCE),
+            SearchScope.ONE,
+            getFilterFromObject(applicationFilter, applicationLdapMapper, searchOperator),
+            pageable,
+            applicationLdapMapper);
+      } else {
+        throw new UnsupportedOperationException(
+            "Applications feature not configured for this realm");
+      }
     } catch (LDAPSearchException e) {
       throw new RuntimeException("Fail to search applications in ldap", e);
     }
@@ -307,14 +319,15 @@ public class LdapReaderStore extends LdapStore implements ReaderStore {
       LdapMapper<ResultType> mapper)
       throws LDAPSearchException {
     SearchRequest searchRequest = new SearchRequest(baseDn, scope, filter, "*", "+");
-    LdapUtils.setRequestControls(searchRequest, pageableResult);
-    SearchResult searchResult = ldapPoolConnection.search(searchRequest);
+    LdapUtils.setRequestControls(searchRequest, pageableResult, config);
+    SearchResult searchResult = ldapMonoConnection.search(searchRequest);
     PageResult<ResultType> pageResult = new PageResult<>();
-    List<ResultType> results =
+    pageResult.setResults(
         searchResult.getSearchEntries().stream()
             .map(e -> mapper.mapFromAttributes(e.getAttributes()))
-            .collect(Collectors.toList());
-    pageResult.setResults(results);
+            .collect(Collectors.toList()));
+    LdapUtils.setResponseControls(pageResult, searchResult);
+    pageResult.setNextStart(pageableResult.getFirst() + pageResult.getPageSize());
     return pageResult;
   }
 

@@ -10,6 +10,7 @@
     - [WebHooks configuration](#webhooks-configuration)
     - [Spring actuator configuration](#spring-actuator-configuration)
     - [Other info configuration](#other-info-configuration)
+    - [Old endpoints configuration](#old-endpoints-configuration)
 
 ## Changing the configuration
 
@@ -31,28 +32,32 @@ Realm can be load from different sources.
 | fr.insee.sugoi.config.ldap.profils.port    |                              Use only if config type is ldap. Ldap host and port where the realm configurations are stored                              |               |         389 |
 | fr.insee.sugoi.config.ldap.profils.branche |                                      Use only if config type is ldap. Ldap subtree where configurations are stored                                      |               |             |
 | fr.insee.sugoi.config.ldap.profils.pattern | Use only if config type is ldap. String pattern to find realms ('{realm}' is replaced with realm's name). cn={realm} wil search realm config for realm1 |               |             |
+| fr.insee.sugoi.ldap.default.vlv.enabled    |                                                               enable vlv searched on ldap                                                               |         false |             |
+| fr.insee.sugoi.config.ldap.default.sortKey |                                                    attribute on which paging request will be ordered                                                    |               |         uid |
 
 ### Reader writer configuration
 
 For each realm we have the possibility to configure a default reader and a default writer. For the moment it's possible to use ldap, file, and jms as writerStore and only ldap and file as reader.
 
-| Properties                                       |                                      Description                                      | Default value |                                         example |
-| ------------------------------------------------ | :-----------------------------------------------------------------------------------: | ------------: | ----------------------------------------------: |
-| fr.insee.sugoi.store.defaultReader               |                        Can be LdapReaderStore, FileReaderStore                        |               |                                 LdapReaderStore |
-| fr.insee.sugoi.store.defaultWriter               |                Can be LdapWriterStore, FileWriterStore, JmsWriterStore                |               |                                 LdapWriterStore |
-| fr.insee.sugoi.jms.broker.url                    |                     Use only if default writer or reader is JMS.                      |               |     ssl://broker.com:61617?verifyHostName=false |
-| fr.insee.sugoi.jms.queue.requests.name           |                           Use only if defaultWriter is JMS.                           |               |              queue.sugoi.developpement.requests |
-| fr.insee.sugoi.jms.queue.response.name           |                           Use only if defaultWriter is JMS.                           |               |              queue.sugoi.developpement.response |
-| fr.insee.sugoi.jms.priority.queue.request.name   |                          Name of the request queue to listen                          |               |  queue.sugoi.developpement.prioritaire.requests |
-| fr.insee.sugoi.jms.priority.queue.response.name  |                         Name of the response queue to listen                          |               | queue.sugoi.developpement.prioritaire.responses |
-| fr.insee.sugoi.jms.receiver.request.enabled      |                     Enable to listen a request queue in a broker                      |               |                                                 |
-| fr.insee.sugoi.jms.receiver.response.enabled     |                     Enable to listen a response queue in a broker                     |               |                                                 |
-| fr.insee.sugoi.ldap.default.ldap.pool            |     Use only if defaultWriter is ldap. Default pool size for each ldap connection     |               |                                              10 |
-| fr.insee.sugoi.ldap.default.username             | Use only if defaultWriter is ldap. Default username to establish connection with ldap |               |                            cn=Directory Manager |
-| fr.insee.sugoi.ldap.default.password             | Use only if defaultWriter is ldap. Default password to establish connection with ldap |               |                                           admin |
-| fr.insee.sugoi.ldap.default.port                 |   Use only if defaultWriter is ldap. Default port to establish connection with ldap   |               |                                           10389 |
-| fr.insee.sugoi.ldap.default.group_source_pattern |      Use only if defaultWriter is ldap. Default pattern to follow to find group       |               |                                                 |
-| fr.insee.sugoi.ldap.default.group_filter_pattern |    Use only if defaultWriter is ldap. Default pattern to follow for naming groups     |               |                                                 |
+| Properties                                            |                                       Description                                       | Default value |                                         example |
+| ----------------------------------------------------- | :-------------------------------------------------------------------------------------: | ------------: | ----------------------------------------------: |
+| fr.insee.sugoi.store.defaultReader                    |                         Can be LdapReaderStore, FileReaderStore                         |               |                                 LdapReaderStore |
+| fr.insee.sugoi.store.defaultWriter                    |                 Can be LdapWriterStore, FileWriterStore, JmsWriterStore                 |               |                                 LdapWriterStore |
+| fr.insee.sugoi.jms.broker.url                         |                      Use only if default writer or reader is JMS.                       |               |     ssl://broker.com:61617?verifyHostName=false |
+| fr.insee.sugoi.jms.queue.requests.name                |                            Use only if defaultWriter is JMS.                            |               |              queue.sugoi.developpement.requests |
+| fr.insee.sugoi.jms.queue.response.name                |                            Use only if defaultWriter is JMS.                            |               |              queue.sugoi.developpement.response |
+| fr.insee.sugoi.jms.priority.queue.request.name        |                           Name of the request queue to listen                           |               |  queue.sugoi.developpement.prioritaire.requests |
+| fr.insee.sugoi.jms.priority.queue.response.name       |                          Name of the response queue to listen                           |               | queue.sugoi.developpement.prioritaire.responses |
+| fr.insee.sugoi.jms.receiver.request.enabled           |                      Enable to listen a request queue in a broker                       |               |                                                 |
+| fr.insee.sugoi.jms.receiver.response.enabled          |                      Enable to listen a response queue in a broker                      |               |                                                 |
+| fr.insee.sugoi.ldap.default.ldap.pool                 |      Use only if defaultWriter is ldap. Default pool size for each ldap connection      |               |                                              10 |
+| fr.insee.sugoi.ldap.default.username                  |  Use only if defaultWriter is ldap. Default username to establish connection with ldap  |               |                            cn=Directory Manager |
+| fr.insee.sugoi.ldap.default.password                  |  Use only if defaultWriter is ldap. Default password to establish connection with ldap  |               |                                           admin |
+| fr.insee.sugoi.ldap.default.port                      |    Use only if defaultWriter is ldap. Default port to establish connection with ldap    |               |                                           10389 |
+| fr.insee.sugoi.ldap.default.group_source_pattern      |       Use only if defaultWriter is ldap. Default pattern to follow to find group        |               |                                                 |
+| fr.insee.sugoi.ldap.default.group_filter_pattern      |     Use only if defaultWriter is ldap. Default pattern to follow for naming groups      |               |                                                 |
+| fr.insee.sugoi.default.app_managed_attribute_keys     |                a list of all attributes that a user can update directly                 |               |
+| fr.insee.sugoi.default.app_managed_attribute_patterns | Default pattern that each fr.insee.sugoi.default.app_managed_attribute_keys must follow |               |
 
 ### SpringDoc configuration
 
@@ -136,7 +141,15 @@ A metrics event module is provided to add metrics when events occured. This is d
 ```
 fr.insee.sugoi.api.event.metrics.enabled=true
 ```
+All actuator endpoints are available to admin users. You can also enable a specific monitoring user with the properties : 
 
+```
+fr.insee.sugoi.security.monitor-user-enabled=true
+fr.insee.sugoi.security.monitor-user-name=monitor
+fr.insee.sugoi.security.monitor-user-password=monitor
+```
+
+This user only has rights on `/actuator` endpoints.
 ### Other info configuration
 
 You can add all other spring properties for example :
@@ -147,3 +160,9 @@ You can add all other spring properties for example :
 | logging.level.root                         |                                   |               |         |
 | logging.level.fr.insee.sugoi               |                                   |               |         |
 | logging.level.org.springframework.security |                                   |               |         |
+
+### Old endpoints configuration
+
+| Properties                                                  |                                                             Description                                                             | Default value |                                              example |
+| ----------------------------------------------------------- | :---------------------------------------------------------------------------------------------------------------------------------: | ------------: | ---------------------------------------------------: |
+| fr.insee.sugoi.api.old.domain.realm_userStorage.association | MAPPING BETWEEN OLD DOMAINS -> NEW REALM AND USERSTORAGE, Must be of the form domain1:realm1_userstorage,domain2:realm2_userstorage |               | TCC:TCC_Profil_TCC_Sugoi,SSM:SSP_ssm,INSEE:SSP_insee |

@@ -87,7 +87,16 @@ public class FileWriterStoreTest {
       simpleTestcUser.setUsername("testc");
       User simpleTestDUser = new User();
       simpleTestDUser.setUsername("Testd");
-      utilisateursApplitest.setUsers(List.of(simpleTestDUser, simpleTestcUser));
+
+      User testoUser = new User();
+      testoUser.setUsername("testo");
+      FileWriter testoUserWriter =
+          new FileWriter(
+              resourceLoader.getResource("classpath:/sugoi-file-tests/users/testo").getFile());
+      testoUserWriter.write(mapper.writeValueAsString(testoUser));
+      testoUserWriter.close();
+
+      utilisateursApplitest.setUsers(List.of(simpleTestDUser, simpleTestcUser, testoUser));
       utilisateursApplitest.setDescription("tata");
       Application applitestApp = new Application();
       applitestApp.setName("Applitest");
@@ -106,14 +115,6 @@ public class FileWriterStoreTest {
                   .getFile());
       webserviceWriter.write(mapper.writeValueAsString(webserviceldapApp));
       webserviceWriter.close();
-
-      User testoUser = new User();
-      testoUser.setUsername("testo");
-      FileWriter testoUserWriter =
-          new FileWriter(
-              resourceLoader.getResource("classpath:/sugoi-file-tests/users/testo").getFile());
-      testoUserWriter.write(mapper.writeValueAsString(testoUser));
-      testoUserWriter.close();
 
       Organization testoOrg = new Organization();
       testoOrg.setIdentifiant("testo");
@@ -248,15 +249,33 @@ public class FileWriterStoreTest {
 
   @Test
   public void testDeleteUser() {
-    User user = new User();
-    user.setUsername("byebye");
-    user.setMail("byebye@toto.fr");
-    fileWriterStore.createUser(user);
+    User userToDelete = new User();
+    userToDelete.setUsername("byebye");
+    userToDelete.setMail("byebye@toto.fr");
+    fileWriterStore.createUser(userToDelete);
+    fileWriterStore.addUserToGroup("Applitest", "Utilisateurs_Applitest", "byebye");
     assertThat(
-        "byebye should have been added", fileReaderStore.getUser("byebye"), not(nullValue()));
+        "byebye is in Utilisateurs_Applitest",
+        fileReaderStore.getGroup("Applitest", "Utilisateurs_Applitest").getUsers().stream()
+            .anyMatch(user -> user.getUsername().equalsIgnoreCase("byebye")));
+    assertThat(
+        "byebye is in Utilisateurs_Applitest",
+        fileReaderStore.getUsersInGroup("Applitest", "Utilisateurs_Applitest").getResults().stream()
+            .anyMatch(user -> user.getUsername().equalsIgnoreCase("byebye")));
     fileWriterStore.deleteUser("byebye");
     assertThat(
         "byebye should have been deleted", fileReaderStore.getUser("byebye"), is(nullValue()));
+    assertThat(
+        "byebye should no more be in Utilisateurs_Applitest",
+        !fileReaderStore.getGroup("Applitest", "Utilisateurs_Applitest").getUsers().stream()
+            .anyMatch(user -> user.getUsername().equalsIgnoreCase("byebye")));
+    assertThat(
+        "byebye is in Utilisateurs_Applitest",
+        !fileReaderStore
+            .getUsersInGroup("Applitest", "Utilisateurs_Applitest")
+            .getResults()
+            .stream()
+            .anyMatch(user -> user.getUsername().equalsIgnoreCase("byebye")));
   }
 
   @Test
@@ -268,6 +287,7 @@ public class FileWriterStoreTest {
     group1.setName("Group1_MyApplication");
     Group group2 = new Group();
     group2.setName("Group2_MyApplication");
+    group2.setUsers(List.of(new User("toto")));
     groups.add(group1);
     groups.add(group2);
     application.setGroups(groups);
@@ -278,22 +298,41 @@ public class FileWriterStoreTest {
         "My application should have groups",
         retrievedApp.getGroups().get(0).getName(),
         is("Group1_MyApplication"));
+    assertThat(
+        "Should not add the users",
+        retrievedApp.getGroups().stream().allMatch(group -> group.getUsers() == null));
   }
 
   @Test
   public void testUpdateApplication() {
     Application application = fileReaderStore.getApplication("Applitest");
-    List<Group> groups = new ArrayList<>();
     Group group1 = new Group();
     group1.setName("Group1_Applitest");
-    groups.add(group1);
-    application.setGroups(groups);
+    application.getGroups().add(group1);
+    application.getGroups().get(0).setDescription("new description");
+    application.getGroups().stream()
+        .filter(group -> group.getName().equals("Utilisateurs_Applitest"))
+        .findFirst()
+        .get()
+        .getUsers()
+        .remove(0);
     fileWriterStore.updateApplication(application);
     Application retrievedApplication = fileReaderStore.getApplication("Applitest");
     assertThat(
         "Applitest should have group1",
         retrievedApplication.getGroups().stream()
             .anyMatch(group -> group.getName().equals("Group1_Applitest")));
+    assertThat(
+        "A group should have description new description",
+        retrievedApplication.getGroups().stream()
+            .anyMatch(group -> group.getDescription().equals("new description")));
+    assertThat(
+        "Users should not have been modified",
+        !retrievedApplication.getGroups().stream()
+            .anyMatch(
+                group ->
+                    group.getName().equals("Utilisateurs_Applitest")
+                        && group.getUsers().size() != 3));
   }
 
   @Test
@@ -362,8 +401,11 @@ public class FileWriterStoreTest {
   public void testDeleteUserInGroup() {
     assertThat(
         "Group should be empty",
-        fileReaderStore.getUsersInGroup("Applitest", "Administrateurs_Applitest").getResults(),
-        is(nullValue()));
+        fileReaderStore
+            .getUsersInGroup("Applitest", "Administrateurs_Applitest")
+            .getResults()
+            .size(),
+        is(0));
     fileWriterStore.addUserToGroup("Applitest", "Administrateurs_Applitest", "testc");
     fileWriterStore.addUserToGroup("Applitest", "Administrateurs_Applitest", "testo");
     fileWriterStore.deleteUserFromGroup("Applitest", "Administrateurs_Applitest", "testo");

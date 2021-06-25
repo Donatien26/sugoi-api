@@ -17,13 +17,14 @@ import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.nullValue;
 
-import fr.insee.sugoi.core.model.PageableResult;
 import fr.insee.sugoi.model.Application;
 import fr.insee.sugoi.model.Group;
 import fr.insee.sugoi.model.Organization;
 import fr.insee.sugoi.model.Realm;
 import fr.insee.sugoi.model.User;
 import fr.insee.sugoi.model.UserStorage;
+import fr.insee.sugoi.model.paging.PageResult;
+import fr.insee.sugoi.model.paging.PageableResult;
 import fr.insee.sugoi.store.ldap.LdapReaderStore;
 import fr.insee.sugoi.store.ldap.LdapStoreBeans;
 import java.util.HashMap;
@@ -272,11 +273,9 @@ public class LdapReaderStoreTest {
   @Test
   public void testGetUsersInGroup() {
     List<User> users =
-        ldapReaderStore.getUsersInGroup("Applitest", "Utilisateurs_Applitest").getResults();
+        ldapReaderStore.getUsersInGroup("Applitest", "Reader_Applitest").getResults();
     assertThat("Should find 2 elements", users.size(), is(2));
-    // for now if a user in a group is not in the current realm, the user is null
-    assertThat("Is null, maybe not the expected behavior", users.get(0), is(nullValue()));
-    assertThat("Should be administrateurs", users.get(1).getUsername(), is("testc"));
+    assertThat("Should be readers", users.get(0).getUsername(), is("testc"));
   }
 
   @Test
@@ -294,5 +293,29 @@ public class LdapReaderStoreTest {
         "Password should not be validated",
         ldapReaderStore.validateCredentials(user, null),
         is(false));
+  }
+
+  @Test
+  public void validateShaCredentialTest() {
+    User user = ldapReaderStore.getUser("shapassword2");
+    assertThat(
+        "Hash password should be validated",
+        ldapReaderStore.validateCredentials(user, "{SHA}c3q3RSeNwMY7E09Ve9oBHw+MVXg="));
+  }
+
+  @Test
+  public void validateNoPasswordTest() {
+    User user = ldapReaderStore.getUser("nopassword");
+    assertThat(
+        "Not having a password should not lead to password validation",
+        !ldapReaderStore.validateCredentials(user, null));
+  }
+
+  @Test
+  public void searchUsersInNonExistantGroupTest() {
+    PageResult<User> usersPageResult =
+        ldapReaderStore.getUsersInGroup("Applitest", "FalseGroup_Applitest");
+    assertThat(
+        "PageResult should exist but without users", usersPageResult.getResults().size(), is(0));
   }
 }

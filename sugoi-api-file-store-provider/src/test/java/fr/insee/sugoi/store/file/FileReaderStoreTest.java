@@ -16,13 +16,14 @@ package fr.insee.sugoi.store.file;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.*;
 
-import fr.insee.sugoi.core.model.PageableResult;
 import fr.insee.sugoi.model.Application;
 import fr.insee.sugoi.model.Group;
 import fr.insee.sugoi.model.Organization;
 import fr.insee.sugoi.model.Realm;
 import fr.insee.sugoi.model.User;
 import fr.insee.sugoi.model.UserStorage;
+import fr.insee.sugoi.model.paging.PageResult;
+import fr.insee.sugoi.model.paging.PageableResult;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -251,6 +252,13 @@ public class FileReaderStoreTest {
     List<User> users =
         fileReaderStore.getUsersInGroup("Applitest", "Utilisateurs_Applitest").getResults();
     assertThat("Should find 2 elements", users.size(), is(2));
+    User testc =
+        users.stream().filter(user -> user.getUsername().equalsIgnoreCase("testc")).findAny().get();
+    assertThat("Information such as mail should be retrieved", testc.getMail(), is("test@test.fr"));
+    assertThat(
+        "Information such as organization's organization should be retrieved",
+        testc.getOrganization().getOrganization().getIdentifiant(),
+        is("testi"));
   }
 
   @Disabled
@@ -269,5 +277,13 @@ public class FileReaderStoreTest {
         "Password should not be validated",
         fileReaderStore.validateCredentials(user, null),
         is(false));
+  }
+
+  @Test
+  public void searchUsersInNonExistantGroupTest() {
+    PageResult<User> usersPageResult =
+        fileReaderStore.getUsersInGroup("Applitest", "FalseGroup_Applitest");
+    assertThat(
+        "PageResult should exist but without users", usersPageResult.getResults().size(), is(0));
   }
 }

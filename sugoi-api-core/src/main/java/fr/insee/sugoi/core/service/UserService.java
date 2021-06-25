@@ -16,10 +16,10 @@ package fr.insee.sugoi.core.service;
 import fr.insee.sugoi.core.exceptions.UserAlreadyExistException;
 import fr.insee.sugoi.core.exceptions.UserNotCreatedException;
 import fr.insee.sugoi.core.exceptions.UserNotFoundException;
-import fr.insee.sugoi.core.model.PageResult;
-import fr.insee.sugoi.core.model.PageableResult;
-import fr.insee.sugoi.core.model.SearchType;
 import fr.insee.sugoi.model.User;
+import fr.insee.sugoi.model.paging.PageResult;
+import fr.insee.sugoi.model.paging.PageableResult;
+import fr.insee.sugoi.model.paging.SearchType;
 import java.util.Optional;
 
 public interface UserService {
@@ -82,4 +82,30 @@ public interface UserService {
       User userProperties,
       PageableResult pageable,
       SearchType typeRecherche);
+
+  /**
+   * Allow to add only the app-managed attribute of an user, this attribute must follow the
+   * app-managed-pattern. All attribute are needed
+   *
+   * @param sugoiUser
+   * @param realm
+   * @param storage
+   * @param userId
+   * @param attribute
+   */
+  void addAppManagedAttribute(
+      String realm, String storage, String userId, String attributeKey, String attribute);
+
+  /**
+   * Allow to delete only app-managed attribute of an user, this attribute must follow the
+   * app-managed-pattern. All attribute are needed
+   *
+   * @param sugoiUser
+   * @param realm
+   * @param storage
+   * @param userId
+   * @param attribute
+   */
+  void deleteAppManagedAttribute(
+      String realm, String storage, String userId, String attributeKey, String attribute);
 }

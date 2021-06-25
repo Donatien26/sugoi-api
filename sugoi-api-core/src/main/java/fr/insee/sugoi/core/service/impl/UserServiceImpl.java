@@ -20,16 +20,19 @@ import fr.insee.sugoi.core.event.publisher.SugoiEventPublisher;
 import fr.insee.sugoi.core.exceptions.UserAlreadyExistException;
 import fr.insee.sugoi.core.exceptions.UserNotCreatedException;
 import fr.insee.sugoi.core.exceptions.UserNotFoundException;
-import fr.insee.sugoi.core.model.PageResult;
-import fr.insee.sugoi.core.model.PageableResult;
-import fr.insee.sugoi.core.model.SearchType;
 import fr.insee.sugoi.core.realm.RealmProvider;
+import fr.insee.sugoi.core.seealso.SeeAlsoService;
 import fr.insee.sugoi.core.service.UserService;
 import fr.insee.sugoi.core.store.ReaderStore;
 import fr.insee.sugoi.core.store.StoreProvider;
 import fr.insee.sugoi.model.Realm;
 import fr.insee.sugoi.model.User;
 import fr.insee.sugoi.model.UserStorage;
+import fr.insee.sugoi.model.paging.PageResult;
+import fr.insee.sugoi.model.paging.PageableResult;
+import fr.insee.sugoi.model.paging.SearchType;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import org.apache.logging.log4j.LogManager;
@@ -45,6 +48,9 @@ public class UserServiceImpl implements UserService {
   @Autowired private RealmProvider realmProvider;
 
   @Autowired private SugoiEventPublisher sugoiEventPublisher;
+
+  @Autowired(required = false)
+  private SeeAlsoService seeAlsoService;
 
   protected static final Logger logger = LogManager.getLogger(UserServiceImpl.class);
 
@@ -151,17 +157,18 @@ public class UserServiceImpl implements UserService {
     User user = null;
     try {
       if (id != null) {
+        Realm realm = realmProvider.load(realmName);
         if (storage != null) {
           user = storeProvider.getReaderStore(realmName, storage).getUser(id);
           user.addMetadatas(GlobalKeysConfig.REALM, realmName.toLowerCase());
           user.addMetadatas(GlobalKeysConfig.USERSTORAGE, storage.toLowerCase());
         } else {
-          Realm r = realmProvider.load(realmName);
-          for (UserStorage us : r.getUserStorages()) {
+          for (UserStorage us : realm.getUserStorages()) {
             try {
               user = storeProvider.getReaderStore(realmName, us.getName()).getUser(id);
               user.addMetadatas(GlobalKeysConfig.REALM, realmName);
               user.addMetadatas(GlobalKeysConfig.USERSTORAGE, us.getName());
+              break;
             } catch (Exception e) {
               logger.debug(
                   "Error when trying to find user "
@@ -173,6 +180,28 @@ public class UserServiceImpl implements UserService {
                       + " error "
                       + e.getMessage());
             }
+          }
+        }
+        if (seeAlsoService != null
+            && realm.getProperties().containsKey(GlobalKeysConfig.SEEALSO_ATTRIBUTES)) {
+          String[] seeAlsosAttributes =
+              realm
+                  .getProperties()
+                  .get(GlobalKeysConfig.SEEALSO_ATTRIBUTES)
+                  .replace(" ", "")
+                  .split(",");
+          List<String> seeAlsos = new ArrayList<>();
+          for (String seeAlsoAttribute : seeAlsosAttributes) {
+            Object seeAlsoAttributeValue = user.getAttributes().get(seeAlsoAttribute);
+            if (seeAlsoAttributeValue instanceof String) {
+              seeAlsos.add((String) seeAlsoAttributeValue);
+            } else if (seeAlsoAttributeValue instanceof List) {
+              ((List<?>) seeAlsoAttributeValue)
+                  .forEach(seeAlso -> seeAlsos.add(seeAlso.toString()));
+            }
+          }
+          for (String seeAlso : seeAlsos) {
+            seeAlsoService.decorateWithSeeAlso(user, seeAlso);
           }
         }
         sugoiEventPublisher.publishCustomEvent(
@@ -232,8 +261,13 @@ public class UserServiceImpl implements UserService {
                     user.addMetadatas(EventKeysConfig.USERSTORAGE, us.getName());
                   });
           result.getResults().addAll(temResult.getResults());
-          result.setTotalElements(result.getResults().size());
-          if (result.getTotalElements() >= result.getPageSize()) {
+          result.setTotalElements(
+              temResult.getTotalElements() == -1
+                  ? temResult.getTotalElements()
+                  : result.getTotalElements() + temResult.getTotalElements());
+          result.setSearchToken(temResult.getSearchToken());
+          result.setHasMoreResult(temResult.isHasMoreResult());
+          if (result.getResults().size() >= result.getPageSize()) {
             sugoiEventPublisher.publishCustomEvent(
                 realm,
                 storage,
@@ -269,5 +303,69 @@ public class UserServiceImpl implements UserService {
             Map.entry(EventKeysConfig.PAGEABLE, pageable),
             Map.entry(EventKeysConfig.TYPE_RECHERCHE, typeRecherche)));
     return result;
+  }
+
+  @Override
+  public void addAppManagedAttribute(
+      String realm, String storage, String userId, String attributeKey, String attribute) {
+    try {
+      findById(realm, storage, userId)
+          .orElseThrow(
+              () -> new UserNotFoundException("Cannot find user " + userId + " in realm " + realm));
+      storeProvider
+          .getWriterStore(realm, storage)
+          .addAppManagedAttribute(userId, attributeKey, attribute);
+      sugoiEventPublisher.publishCustomEvent(
+          realm,
+          storage,
+          SugoiEventTypeEnum.ADD_APP_MANAGED_ATTRIBUTES,
+          Map.ofEntries(
+              Map.entry(EventKeysConfig.ATTRIBUTE_KEY, attributeKey),
+              Map.entry(EventKeysConfig.ATTRIBUTE_VALUE, attribute),
+              Map.entry(EventKeysConfig.USER_ID, userId)));
+    } catch (Exception e) {
+      sugoiEventPublisher.publishCustomEvent(
+          realm,
+          storage,
+          SugoiEventTypeEnum.ADD_APP_MANAGED_ATTRIBUTES_ERROR,
+          Map.ofEntries(
+              Map.entry(EventKeysConfig.ATTRIBUTE_KEY, attributeKey),
+              Map.entry(EventKeysConfig.ATTRIBUTE_VALUE, attribute),
+              Map.entry(EventKeysConfig.USER_ID, userId),
+              Map.entry(EventKeysConfig.ERROR, e.toString())));
+      throw e;
+    }
+  }
+
+  @Override
+  public void deleteAppManagedAttribute(
+      String realm, String storage, String userId, String attributeKey, String attribute) {
+    try {
+      findById(realm, storage, userId)
+          .orElseThrow(
+              () -> new UserNotFoundException("Cannot find user " + userId + " in realm " + realm));
+      storeProvider
+          .getWriterStore(realm, storage)
+          .deleteAppManagedAttribute(userId, attributeKey, attribute);
+      sugoiEventPublisher.publishCustomEvent(
+          realm,
+          storage,
+          SugoiEventTypeEnum.DELETE_APP_MANAGED_ATTRIBUTES,
+          Map.ofEntries(
+              Map.entry(EventKeysConfig.ATTRIBUTE_KEY, attributeKey),
+              Map.entry(EventKeysConfig.ATTRIBUTE_VALUE, attribute),
+              Map.entry(EventKeysConfig.USER_ID, userId)));
+    } catch (Exception e) {
+      sugoiEventPublisher.publishCustomEvent(
+          realm,
+          storage,
+          SugoiEventTypeEnum.DELETE_APP_MANAGED_ATTRIBUTES_ERROR,
+          Map.ofEntries(
+              Map.entry(EventKeysConfig.ATTRIBUTE_KEY, attributeKey),
+              Map.entry(EventKeysConfig.ATTRIBUTE_VALUE, attribute),
+              Map.entry(EventKeysConfig.USER_ID, userId),
+              Map.entry(EventKeysConfig.ERROR, e.toString())));
+      throw e;
+    }
   }
 }

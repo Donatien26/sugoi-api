@@ -17,11 +17,14 @@ import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.nullValue;
-import static org.junit.jupiter.api.Assertions.fail;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import fr.insee.sugoi.core.configuration.GlobalKeysConfig;
+import fr.insee.sugoi.core.exceptions.InvalidPasswordException;
 import fr.insee.sugoi.core.exceptions.StoragePolicyNotMetException;
 import fr.insee.sugoi.model.Application;
 import fr.insee.sugoi.model.Group;
+import fr.insee.sugoi.model.Habilitation;
 import fr.insee.sugoi.model.Organization;
 import fr.insee.sugoi.model.Realm;
 import fr.insee.sugoi.model.User;
@@ -65,6 +68,12 @@ public class LdapWriterStoreTest {
   @Value("${fr.insee.sugoi.ldap.default.addresssource:}")
   private String addressSource;
 
+  @Value("${fr.insee.sugoi.ldap.default.app_managed_attribute_pattern:}")
+  private String appManagedAttributePattern;
+
+  @Value("${fr.insee.sugoi.ldap.default.app_managed_attribute_key:}")
+  private String appManagedAttributeKey;
+
   @Bean
   public UserStorage userStorage() {
     UserStorage us = new UserStorage();
@@ -83,6 +92,9 @@ public class LdapWriterStoreTest {
     realm.setName("domaine1");
     realm.setUrl("localhost");
     realm.setAppSource(appSource);
+    realm.addProperty(GlobalKeysConfig.APP_MANAGED_ATTRIBUTE_KEYS_LIST, appManagedAttributeKey);
+    realm.addProperty(
+        GlobalKeysConfig.APP_MANAGED_ATTRIBUTE_PATTERNS_LIST, appManagedAttributePattern);
     return realm;
   }
 
@@ -152,6 +164,7 @@ public class LdapWriterStoreTest {
     address.put("Ligne2", "Chez Toto");
     user.setAddress(address);
     user.addAttributes("additionalMail", "other@insee.fr");
+    user.addHabilitation(new Habilitation("application", "role", "property"));
     ldapWriterStore.createUser(user);
     User retrievedUser = ldapReaderStore.getUser("Titi");
     assertThat("Titi should have been added", retrievedUser, not(nullValue()));
@@ -191,9 +204,28 @@ public class LdapWriterStoreTest {
 
   @Test
   public void testDeleteUser() {
+    assertThat(
+        "byebye is in Utilisateurs_Applitest",
+        ldapReaderStore.getGroup("Applitest", "Utilisateurs_Applitest").getUsers().stream()
+            .anyMatch(user -> user.getUsername().equalsIgnoreCase("byebye")));
+    assertThat(
+        "byebye is in Utilisateurs_Applitest",
+        ldapReaderStore.getUsersInGroup("Applitest", "Utilisateurs_Applitest").getResults().stream()
+            .anyMatch(user -> user.getUsername().equalsIgnoreCase("byebye")));
     ldapWriterStore.deleteUser("byebye");
     assertThat(
-        "testc should have been deleted", ldapReaderStore.getUser("byebye"), is(nullValue()));
+        "byebye should have been deleted", ldapReaderStore.getUser("byebye"), is(nullValue()));
+    assertThat(
+        "byebye should no more be in Utilisateurs_Applitest",
+        !ldapReaderStore.getGroup("Applitest", "Utilisateurs_Applitest").getUsers().stream()
+            .anyMatch(user -> user.getUsername().equalsIgnoreCase("byebye")));
+    assertThat(
+        "byebye is in Utilisateurs_Applitest",
+        !ldapReaderStore
+            .getUsersInGroup("Applitest", "Utilisateurs_Applitest")
+            .getResults()
+            .stream()
+            .anyMatch(user -> user.getUsername().equalsIgnoreCase("byebye")));
   }
 
   @Test
@@ -218,19 +250,61 @@ public class LdapWriterStoreTest {
   }
 
   @Test
-  public void testUpdateApplication() {
+  public void testUpdateApplicationWithGroupAdding() {
     Application application = ldapReaderStore.getApplication("Applitest");
-    List<Group> groups = new ArrayList<>();
     Group group1 = new Group();
     group1.setName("Group1_Applitest");
-    groups.add(group1);
-    application.setGroups(groups);
+    application.getGroups().add(group1);
     ldapWriterStore.updateApplication(application);
     Application retrievedApplication = ldapReaderStore.getApplication("Applitest");
     assertThat(
         "Applitest should have group1",
         retrievedApplication.getGroups().stream()
             .anyMatch(group -> group.getName().equals("Group1_Applitest")));
+  }
+
+  @Test
+  public void testUpdateApplicationWithGroupRemoving() {
+    Application application = ldapReaderStore.getApplication("Applitest");
+    Group adminApplitestGroup =
+        application.getGroups().stream()
+            .filter(group -> group.getName().equalsIgnoreCase("ToDelete_Applitest"))
+            .findFirst()
+            .get();
+    application.getGroups().remove(adminApplitestGroup);
+    ldapWriterStore.updateApplication(application);
+    Application retrievedApplication = ldapReaderStore.getApplication("Applitest");
+    assertThat(
+        "Applitest should not have todelete",
+        !retrievedApplication.getGroups().stream()
+            .anyMatch(group -> group.getName().equals("ToDelete_Applitest")));
+  }
+
+  @Test
+  public void testUpdateApplicationWithGroupModifying() {
+    Application application = ldapReaderStore.getApplication("Applitest");
+    Group adminApplitestGroup =
+        application.getGroups().stream()
+            .filter(group -> group.getName().equalsIgnoreCase("ToUpdate_Applitest"))
+            .findFirst()
+            .get();
+    adminApplitestGroup.setDescription("new description");
+    ldapWriterStore.updateApplication(application);
+    Application retrievedApplication = ldapReaderStore.getApplication("Applitest");
+    assertThat(
+        "ToUpdate should have description new description",
+        retrievedApplication.getGroups().stream()
+            .anyMatch(
+                group ->
+                    group.getName().equalsIgnoreCase("ToUpdate_Applitest")
+                        && group.getDescription().equalsIgnoreCase("new description")));
+    assertThat(
+        "ToUpdate should still have users",
+        retrievedApplication.getGroups().stream()
+            .anyMatch(
+                group ->
+                    group.getName().equalsIgnoreCase("ToUpdate_Applitest")
+                        && group.getUsers().size() > 0));
   }
 
   @Test
@@ -344,16 +418,120 @@ public class LdapWriterStoreTest {
 
   @Test
   public void testGroupShouldMatchGroupPattern() {
-    try {
-      Group groupWontCreate = new Group();
-      groupWontCreate.setName("bad_group_badsuffix");
-      ldapWriterStore.createGroup("WebServicesLdap", groupWontCreate);
-      fail();
-    } catch (StoragePolicyNotMetException e) {
-      assertThat("Should get correct message", e.getMessage(), is("Group pattern won't match"));
-      Group groupToCreate = new Group();
-      groupToCreate.setName("good_group_webServicesLdap");
-      ldapWriterStore.createGroup("WebServicesLdap", groupToCreate);
-    }
+    Group groupWontCreate = new Group();
+    groupWontCreate.setName("bad_group_badsuffix");
+    StoragePolicyNotMetException e =
+        assertThrows(
+            StoragePolicyNotMetException.class,
+            () -> ldapWriterStore.createGroup("WebServicesLdap", groupWontCreate));
+    assertThat("Should get correct message", e.getMessage(), is("Group pattern won't match"));
+    Group groupToCreate = new Group();
+    groupToCreate.setName("good_group_webServicesLdap");
+    ldapWriterStore.createGroup("WebServicesLdap", groupToCreate);
+  }
+
+  @Test
+  public void testInitPasswordNullFails() {
+    User user = ldapReaderStore.getUser("testc");
+    assertThrows(Exception.class, () -> ldapWriterStore.initPassword(user, null, null, null));
+  }
+
+  @Test
+  public void testInitPassword() {
+    User user = ldapReaderStore.getUser("testo");
+    ldapWriterStore.initPassword(user, "toto", null, null);
+    assertThat(
+        "Password toto should be validated", ldapReaderStore.validateCredentials(user, "toto"));
+    assertThat(
+        "Password testc should not be validated",
+        !ldapReaderStore.validateCredentials(user, "testc"));
+  }
+
+  @Test
+  public void testReinitPassword() {
+    User user = ldapReaderStore.getUser("testo");
+    assertThat(
+        "Password should not be reinit", !ldapReaderStore.validateCredentials(user, "reinit"));
+    ldapWriterStore.reinitPassword(user, "reinit", null, null);
+    assertThat("Password should be reinit", ldapReaderStore.validateCredentials(user, "reinit"));
+    assertThat("Password should not be testo", !ldapReaderStore.validateCredentials(user, "testo"));
+    ldapWriterStore.reinitPassword(user, "reinit2", null, null);
+    assertThat("Password should be reinit2", ldapReaderStore.validateCredentials(user, "reinit2"));
+    assertThat(
+        "Password should not be reinit", !ldapReaderStore.validateCredentials(user, "reinit"));
+  }
+
+  @Test
+  public void testChangePasswordWithFalseOld() {
+    User user = ldapReaderStore.getUser("rawpassword");
+    assertThrows(
+        InvalidPasswordException.class,
+        () -> ldapWriterStore.changePassword(user, "falsepassword", "newpassword", null));
+    assertThat(
+        "Password should not be newpassword",
+        !ldapReaderStore.validateCredentials(user, "newpassword"));
+  }
+
+  @Test
+  public void testChangePasswordWithTrueOld() {
+    User user = ldapReaderStore.getUser("rawpassword");
+    ldapWriterStore.changePassword(user, "truepassword", "newpassword", null);
+    assertThat(
+        "Should have a new password", ldapReaderStore.validateCredentials(user, "newpassword"));
+    assertThat(
+        "Password should no more be truepassword",
+        !ldapReaderStore.validateCredentials(user, "truepassword"));
+  }
+
+  @Test
+  public void testChangePasswordWithoutOld() {
+    User user = ldapReaderStore.getUser("nopassword");
+    assertThrows(
+        InvalidPasswordException.class,
+        () -> ldapWriterStore.changePassword(user, "", "newpassword", null));
+    ldapWriterStore.changePassword(user, null, "newpassword", null);
+    assertThat(
+        "Should have a new password", ldapReaderStore.validateCredentials(user, "newpassword"));
+  }
+
+  @Test
+  public void testChangeShaPassword() {
+    User user = ldapReaderStore.getUser("shapassword");
+    ldapWriterStore.changePassword(user, "{SHA}c3q3RSeNwMY7E09Ve9oBHw+MVXg=", "newpassword", null);
+    assertThat(
+        "Should have a new password", ldapReaderStore.validateCredentials(user, "newpassword"));
+  }
+
+  @Test
+  public void testAddAppManagedAttribute() {
+    User user = new User();
+    user.setUsername("testAppManagedAdd");
+    user.setLastName("Test");
+    user.setFirstName("Petit");
+    user.setMail("petittest@titi.fr");
+    ldapWriterStore.createUser(user);
+    ldapWriterStore.addAppManagedAttribute(
+        "testAppManagedAdd", "inseeGroupeDefaut", "prop_role_appli");
+    User retrievedUser = ldapReaderStore.getUser("testAppManagedAdd");
+    assertThat(
+        "Should have a new habilitation",
+        retrievedUser.getHabilitations().get(0).getId(),
+        is("prop_role_appli"));
+  }
+
+  @Test
+  public void testDeleteAppManagedAttribute() {
+    User user = new User();
+    user.setUsername("testAppManagedDelete");
+    user.setLastName("Test");
+    user.setFirstName("Petit");
+    user.setMail("petittest@titi.fr");
+    user.addHabilitation(new Habilitation("application", "role", "property"));
+    ldapWriterStore.createUser(user);
+    ldapWriterStore.deleteAppManagedAttribute(
+        "testAppManagedDelete", "inseeGroupeDefaut", "property_role_application");
+    User retrievedUser = ldapReaderStore.getUser("testAppManagedDelete");
+    assertThat(
+        "Should have a delete one habilitation", retrievedUser.getHabilitations().size(), is(0));
   }
 }

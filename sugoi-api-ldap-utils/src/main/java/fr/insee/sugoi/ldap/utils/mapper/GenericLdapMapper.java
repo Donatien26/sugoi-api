@@ -197,6 +197,9 @@ public class GenericLdapMapper {
                         })
                     .collect(Collectors.toList()));
             break;
+          case LIST_STRING:
+            entityField.set(mappedEntity, attributeValues);
+            break;
           default:
             entityField.set(mappedEntity, attributeValues.get(0));
         }
@@ -316,14 +319,20 @@ public class GenericLdapMapper {
               addressAttributeList.add(addressAttribute);
             }
             return addressAttributeList;
+          case LIST_STRING:
+            return ((List<String>) attributeValue)
+                .stream()
+                    .map(value -> new Attribute(attributeName, value))
+                    .collect(Collectors.toList());
           default:
-            List<Attribute> attributeList = new ArrayList<>();
-            Attribute attribute =
-                new Attribute(
-                    ldapField.getAnnotation(AttributeLdapName.class).value(),
-                    (String) attributeValue);
-            attributeList.add(attribute);
-            return attributeList;
+            if ((String) attributeValue != "") {
+              return List.of(
+                  new Attribute(
+                      ldapField.getAnnotation(AttributeLdapName.class).value(),
+                      (String) attributeValue));
+            } else {
+              return List.of();
+            }
         }
       }
       return null;

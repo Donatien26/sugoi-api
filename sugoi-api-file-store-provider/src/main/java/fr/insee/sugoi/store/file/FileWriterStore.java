@@ -15,13 +15,13 @@ package fr.insee.sugoi.store.file;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import fr.insee.sugoi.core.model.PasswordChangeRequest;
-import fr.insee.sugoi.core.model.SendMode;
 import fr.insee.sugoi.core.store.WriterStore;
 import fr.insee.sugoi.model.Application;
 import fr.insee.sugoi.model.Group;
 import fr.insee.sugoi.model.Organization;
 import fr.insee.sugoi.model.User;
+import fr.insee.sugoi.model.paging.PasswordChangeRequest;
+import fr.insee.sugoi.model.paging.SendMode;
 import fr.insee.sugoi.store.file.configuration.FileKeysConfig;
 import java.io.File;
 import java.io.FileWriter;
@@ -48,6 +48,9 @@ public class FileWriterStore implements WriterStore {
 
   @Override
   public void deleteUser(String id) {
+    fileReaderStore.setResourceLoader(resourceLoader);
+    User user = fileReaderStore.getUser(id);
+    user.getGroups().forEach(group -> deleteUserFromGroup(group.getAppName(), group.getName(), id));
     deleteResourceFile(config.get(FileKeysConfig.USER_SOURCE), id);
   }
 
@@ -111,10 +114,6 @@ public class FileWriterStore implements WriterStore {
     }
   }
 
-  /**
-   * To avoid unconsistency between users and groups, group is recreated without users and then
-   * users are added
-   */
   @Override
   public Group updateGroup(String appName, Group updatedGroup) {
     fileReaderStore.setResourceLoader(resourceLoader);
@@ -125,14 +124,6 @@ public class FileWriterStore implements WriterStore {
               .anyMatch(
                   filterGroup -> filterGroup.getName().equalsIgnoreCase(updatedGroup.getName()))) {
 
-        // simplify group and keep users
-        List<User> usersToAdd =
-            updatedGroup.getUsers() != null
-                ? new ArrayList<>(updatedGroup.getUsers())
-                : new ArrayList<>();
-        updatedGroup.setUsers(new ArrayList<>());
-
-        // update group in application
         application
             .getGroups()
             .removeIf(
@@ -140,10 +131,6 @@ public class FileWriterStore implements WriterStore {
         application.getGroups().add(updatedGroup);
         updateApplication(application);
 
-        // add each users in updated group
-        usersToAdd.forEach(
-            user -> addUserToGroup(appName, updatedGroup.getName(), user.getUsername()));
-        updatedGroup.setUsers(usersToAdd);
         return updatedGroup;
       } else {
         throw new RuntimeException(
@@ -156,33 +143,49 @@ public class FileWriterStore implements WriterStore {
 
   @Override
   public void deleteOrganization(String name) {
-    deleteResourceFile(config.get(FileKeysConfig.ORGANIZATION_SOURCE), name);
+    if (config.get(FileKeysConfig.ORGANIZATION_SOURCE) != null) {
+      deleteResourceFile(config.get(FileKeysConfig.ORGANIZATION_SOURCE), name);
+    } else {
+      throw new UnsupportedOperationException(
+          "organizations feature not configured for this storage");
+    }
   }
 
   @Override
   public Organization createOrganization(Organization organization) {
-    try {
-      createResourceFile(
-          config.get(FileKeysConfig.ORGANIZATION_SOURCE),
-          organization.getIdentifiant(),
-          mapper.writeValueAsString(organization));
-    } catch (JsonProcessingException e) {
-      throw new RuntimeException("Error mapping organization " + organization.getIdentifiant(), e);
+    if (config.get(FileKeysConfig.ORGANIZATION_SOURCE) != null) {
+      try {
+        createResourceFile(
+            config.get(FileKeysConfig.ORGANIZATION_SOURCE),
+            organization.getIdentifiant(),
+            mapper.writeValueAsString(organization));
+      } catch (JsonProcessingException e) {
+        throw new RuntimeException(
+            "Error mapping organization " + organization.getIdentifiant(), e);
+      }
+      return organization;
+    } else {
+      throw new UnsupportedOperationException(
+          "organizations feature not configured for this storage");
     }
-    return organization;
   }
 
   @Override
   public Organization updateOrganization(Organization updatedOrganization) {
-    try {
-      updateResourceFile(
-          config.get(FileKeysConfig.ORGANIZATION_SOURCE),
-          updatedOrganization.getIdentifiant(),
-          mapper.writeValueAsString(updatedOrganization));
-      return updatedOrganization;
-    } catch (JsonProcessingException e) {
-      throw new RuntimeException(
-          "Error mapping organization" + updatedOrganization.getIdentifiant(), e);
+    if (config.get(FileKeysConfig.ORGANIZATION_SOURCE) != null) {
+      try {
+        updateResourceFile(
+            config.get(FileKeysConfig.ORGANIZATION_SOURCE),
+            updatedOrganization.getIdentifiant(),
+            mapper.writeValueAsString(updatedOrganization));
+        return updatedOrganization;
+      } catch (JsonProcessingException e) {
+        throw new RuntimeException(
+            "Error mapping organization" + updatedOrganization.getIdentifiant(), e);
+      }
+    } else {
+      throw new UnsupportedOperationException(
+          "organizations feature not configured for this storage");
     }
   }
 
@@ -208,10 +211,17 @@ public class FileWriterStore implements WriterStore {
                         && groupFilter.getName().equalsIgnoreCase(groupName));
         updateUser(user);
         if (group.getUsers() != null) {
-          group
-              .getUsers()
-              .removeIf(userFilter -> userFilter.getUsername().equalsIgnoreCase(userId));
-          updateApplication(application);
+          try {
+            group
+                .getUsers()
+                .removeIf(userFilter -> userFilter.getUsername().equalsIgnoreCase(userId));
+            updateResourceFile(
+                config.get(FileKeysConfig.APP_SOURCE),
+                application.getName(),
+                mapper.writeValueAsString(application));
+          } catch (JsonProcessingException e) {
+            throw new RuntimeException("Error mapping application " + application.getName(), e);
+          }
         }
       } else {
         throw new RuntimeException("Group " + groupName + " doesn't exist in " + appName);
@@ -240,16 +250,23 @@ public class FileWriterStore implements WriterStore {
       if (group != null) {
         User user = fileReaderStore.getUser(userId);
         if (user != null) {
-          if (user.getGroups() == null) {
-            user.setGroups(new ArrayList<>());
+          try {
+            if (user.getGroups() == null) {
+              user.setGroups(new ArrayList<>());
+            }
+            user.getGroups().add(new Group(appName, groupName));
+            updateUser(user);
+            if (group.getUsers() == null) {
+              group.setUsers(new ArrayList<>());
+            }
+            group.getUsers().add(user);
+            updateResourceFile(
+                config.get(FileKeysConfig.APP_SOURCE),
+                application.getName(),
+                mapper.writeValueAsString(application));
+          } catch (JsonProcessingException e) {
+            throw new RuntimeException("Error mapping application " + application.getName(), e);
           }
-          user.getGroups().add(new Group(appName, groupName));
-          updateUser(user);
-          if (group.getUsers() == null) {
-            group.setUsers(new ArrayList<>());
-          }
-          group.getUsers().add(user);
-          updateApplication(application);
         } else {
           throw new RuntimeException("User " + userId + " not found");
         }
@@ -264,49 +281,70 @@ public class FileWriterStore implements WriterStore {
   @Override
   public void reinitPassword(
       User user, String generatedPassword, PasswordChangeRequest pcr, List<SendMode> sendMode) {
-    throw new NotImplementedException();
+    throw new UnsupportedOperationException("Password actions are not supported on file storage");
   }
 
   @Override
   public void initPassword(
       User user, String password, PasswordChangeRequest pcr, List<SendMode> sendMode) {
-    throw new NotImplementedException();
+    throw new UnsupportedOperationException("Password actions are not supported on file storage");
   }
 
   @Override
   public void changePasswordResetStatus(User user, boolean isReset) {
-    throw new NotImplementedException();
+    throw new UnsupportedOperationException("Password actions are not supported on file storage");
   }
 
   @Override
   public Application createApplication(Application application) {
-    try {
-      createResourceFile(
-          config.get(FileKeysConfig.APP_SOURCE),
-          application.getName(),
-          mapper.writeValueAsString(application));
-    } catch (JsonProcessingException e) {
-      throw new RuntimeException("Error mapping application " + application.getName(), e);
+    if (config.get(FileKeysConfig.APP_SOURCE) != null) {
+      try {
+        application.getGroups().forEach(group -> group.setUsers(null));
+        createResourceFile(
+            config.get(FileKeysConfig.APP_SOURCE),
+            application.getName(),
+            mapper.writeValueAsString(application));
+        return application;
+      } catch (JsonProcessingException e) {
+        throw new RuntimeException("Error mapping application " + application.getName(), e);
+      }
+    } else {
+      throw new UnsupportedOperationException("Applications feature not configured for this realm");
     }
-    return application;
   }
 
   @Override
   public Application updateApplication(Application updatedApplication) {
-    try {
-      updateResourceFile(
-          config.get(FileKeysConfig.APP_SOURCE),
-          updatedApplication.getName(),
-          mapper.writeValueAsString(updatedApplication));
-      return updatedApplication;
-    } catch (JsonProcessingException e) {
-      throw new RuntimeException("Error mapping application" + updatedApplication.getName(), e);
+    if (config.get(FileKeysConfig.APP_SOURCE) != null) {
+      try {
+        fileReaderStore.setResourceLoader(resourceLoader);
+        for (Group updatedGroup : updatedApplication.getGroups()) {
+          Group existingGroup =
+              fileReaderStore.getGroup(updatedApplication.getName(), updatedGroup.getName());
+          if (existingGroup != null) {
+            updatedGroup.setUsers(existingGroup.getUsers());
+          }
+        }
+        updateResourceFile(
+            config.get(FileKeysConfig.APP_SOURCE),
+            updatedApplication.getName(),
+            mapper.writeValueAsString(updatedApplication));
+        return updatedApplication;
+      } catch (JsonProcessingException e) {
+        throw new RuntimeException("Error mapping application" + updatedApplication.getName(), e);
+      }
+    } else {
+      throw new UnsupportedOperationException("Applications feature not configured for this realm");
     }
   }
 
   @Override
   public void deleteApplication(String applicationName) {
-    deleteResourceFile(config.get(FileKeysConfig.APP_SOURCE), applicationName);
+    if (config.get(FileKeysConfig.APP_SOURCE) != null) {
+      deleteResourceFile(config.get(FileKeysConfig.APP_SOURCE), applicationName);
+    } else {
+      throw new UnsupportedOperationException("Applications feature not configured for this realm");
+    }
   }
 
   @Override
@@ -343,5 +381,15 @@ public class FileWriterStore implements WriterStore {
     } catch (IOException e) {
       throw new RuntimeException("Error writing in file", e);
     }
+  }
+
+  @Override
+  public void addAppManagedAttribute(String userId, String attributeKey, String attribute) {
+    throw new NotImplementedException();
+  }
+
+  @Override
+  public void deleteAppManagedAttribute(String userId, String attributeKey, String attribute) {
+    throw new NotImplementedException();
   }
 }
