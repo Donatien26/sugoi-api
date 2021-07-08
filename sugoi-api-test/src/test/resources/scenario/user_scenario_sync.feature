@@ -1,4 +1,4 @@
-Feature: User scenario
+Feature: User scenario asynchrone
     Performing actions on user
 
     Background: Use tomcat1

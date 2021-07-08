@@ -36,9 +36,6 @@ import java.util.Map;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
-// TODO bien faire gaffe a cette classe toute les verifs ne sont pas faites au niveau du provider le
-// ldap doit checker que les configurations sont bien faites alors que le jms envoie la requete et
-// ne s'occupe de rien
 @Service
 public class CredentialsServiceImpl implements CredentialsService {
 

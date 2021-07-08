@@ -38,17 +38,18 @@ import org.apache.commons.net.util.Base64;
 
 public class GenericGlue {
 
-  private Scenario scenario;
-
   @Before
   public void before(Scenario scenario) {
     this.scenario = scenario;
   }
 
+  private Scenario scenario;
   private StepData stepData;
 
-  String basicUsername = null;
-  String basicPassword = null;
+  private String basicUsername = null;
+  private String basicPassword = null;
+
+  private Map<String, String> headers = new HashMap<>();
 
   public GenericGlue(StepData stepData) {
     this.stepData = stepData;
@@ -76,11 +77,24 @@ public class GenericGlue {
     basicPassword = password;
   }
 
+  @Given("the client make an asynchronous request")
+  public void async_request() {
+    headers.put("X-SUGOI-ASYNCHRONOUS-ALLOWED-REQUEST", "true");
+  }
+
+  @Given("the client check status for transaction {}")
+  public void check_status(int id) {
+    headers.put("X-SUGOI-TRANSACTION-ID", String.valueOf(id));
+  }
+
+  @Given("the client want to use the urgent queue")
+  public void urgent_queue() {
+    headers.put("X-SUGOI-URGENT-REQUEST", "true");
+  }
+
   @When("the client perform {} request with body on url {} body:")
-  public void the_client_perform_request_on_url(String MethodType, String url, String body)
-      throws Throwable {
+  public void the_client_perform_request_on_url(String MethodType, String url, String body) throws Throwable {
     WebRequest webRequest = new WebRequest();
-    Map<String, String> headers = new HashMap<>();
     if (basicPassword != null && basicUsername != null) {
       String auth = basicUsername + ":" + basicPassword;
       byte[] encodedAuth = Base64.encodeBase64(auth.getBytes());
@@ -89,20 +103,16 @@ public class GenericGlue {
     }
     switch (MethodType) {
       case "GET":
-        stepData.setLatestResponse(
-            webRequest.executeGet(stepData.getDefaultTomcatUrl() + url, headers, body));
+        stepData.setLatestResponse(webRequest.executeGet(stepData.getDefaultTomcatUrl() + url, headers, body));
         break;
       case "POST":
-        stepData.setLatestResponse(
-            webRequest.executePost(stepData.getDefaultTomcatUrl() + url, headers, body));
+        stepData.setLatestResponse(webRequest.executePost(stepData.getDefaultTomcatUrl() + url, headers, body));
         break;
       case "DELETE":
-        stepData.setLatestResponse(
-            webRequest.executeDelete(stepData.getDefaultTomcatUrl() + url, headers, body));
+        stepData.setLatestResponse(webRequest.executeDelete(stepData.getDefaultTomcatUrl() + url, headers, body));
         break;
       case "PUT":
-        stepData.setLatestResponse(
-            webRequest.executeUpdate(stepData.getDefaultTomcatUrl() + url, headers, body));
+        stepData.setLatestResponse(webRequest.executeUpdate(stepData.getDefaultTomcatUrl() + url, headers, body));
         break;
     }
   }
@@ -110,7 +120,6 @@ public class GenericGlue {
   @When("the client perform {} request on url {}")
   public void the_client_perform_request_on_url(String MethodType, String url) throws Throwable {
     WebRequest webRequest = new WebRequest();
-    Map<String, String> headers = new HashMap<>();
     if (basicPassword != null && basicUsername != null) {
       String auth = basicUsername + ":" + basicPassword;
       byte[] encodedAuth = Base64.encodeBase64(auth.getBytes());
@@ -119,29 +128,23 @@ public class GenericGlue {
     }
     switch (MethodType) {
       case "GET":
-        stepData.setLatestResponse(
-            webRequest.executeGet(stepData.getDefaultTomcatUrl() + url, headers, null));
+        stepData.setLatestResponse(webRequest.executeGet(stepData.getDefaultTomcatUrl() + url, headers, null));
         break;
       case "POST":
-        stepData.setLatestResponse(
-            webRequest.executePost(stepData.getDefaultTomcatUrl() + url, headers, null));
+        stepData.setLatestResponse(webRequest.executePost(stepData.getDefaultTomcatUrl() + url, headers, null));
         break;
       case "DELETE":
-        stepData.setLatestResponse(
-            webRequest.executeDelete(stepData.getDefaultTomcatUrl() + url, headers, null));
+        stepData.setLatestResponse(webRequest.executeDelete(stepData.getDefaultTomcatUrl() + url, headers, null));
         break;
       case "PUT":
-        stepData.setLatestResponse(
-            webRequest.executeUpdate(stepData.getDefaultTomcatUrl() + url, headers, null));
+        stepData.setLatestResponse(webRequest.executeUpdate(stepData.getDefaultTomcatUrl() + url, headers, null));
         break;
     }
   }
 
   @Then("the client receives status code {}")
   public void the_client_receive_status_code(int statusCode) throws IOException {
-    assertThat(
-        stepData.getLatestResponse().getClientHttpResponse().getStatusCode().value(),
-        is(statusCode));
+    assertThat(stepData.getLatestResponse().getClientHttpResponse().getStatusCode().value(), is(statusCode));
   }
 
   @And("the client receives body:")
@@ -152,6 +155,11 @@ public class GenericGlue {
   @And("show body received")
   public void body_received() throws Throwable {
     scenario.log(stepData.getLatestResponse().getBody());
+  }
+
+  @And("show header {} ")
+  public void headers_received(String name) throws Throwable {
+    scenario.log(stepData.getLatestResponse().getHeader(name).toString());
   }
 
   // the metric CREATE_USER is 1
@@ -165,8 +173,7 @@ public class GenericGlue {
     Map<String, String> headers = new HashMap<>();
     headers.put("Authorization", authHeader);
     try {
-      String url =
-          stepData.getDefaultTomcatUrl() + "/actuator/metrics/" + metricName; // + "?" + tags;
+      String url = stepData.getDefaultTomcatUrl() + "/actuator/metrics/" + metricName; // + "?" + tags;
       ResponseResults response = webRequest.executeGet(url, headers, null);
       JsonNode metricJson = mapper.readTree(response.getBody());
 
@@ -190,8 +197,7 @@ public class GenericGlue {
     headers.put("Authorization", authHeader);
     while (!isReady) {
       try {
-        ResponseResults response =
-            webRequest.executeGet(stepData.getDefaultTomcatUrl() + "/realms", headers, null);
+        ResponseResults response = webRequest.executeGet(stepData.getDefaultTomcatUrl() + "/realms", headers, null);
         List<Realm> realms = Arrays.asList(mapper.readValue(response.getBody(), Realm[].class));
         System.out.println(response.getBody());
 

@@ -190,7 +190,6 @@ public class GroupServiceImpl implements GroupService {
     }
   }
 
-  // TODO attention il manque le userStorage du userId a ajouter
   @Override
   public ProviderResponse addUserToGroup(
       String realm,
